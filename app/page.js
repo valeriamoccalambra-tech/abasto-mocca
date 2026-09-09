@@ -45,7 +45,16 @@ export default function App() {
   if (pantalla === 'login') return <Login onIngresar={alIngresar} />;
   if (pantalla === 'stock')
     return <Stock onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
-  return <Home usuario={usuario} onVerStock={() => setPantalla('stock')} onCerrarSesion={cerrarSesion} />;
+  if (pantalla === 'entrada')
+    return <Entrada usuario={usuario} onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
+  return (
+    <Home
+      usuario={usuario}
+      onVerStock={() => setPantalla('stock')}
+      onRegistrarEntrada={() => setPantalla('entrada')}
+      onCerrarSesion={cerrarSesion}
+    />
+  );
 }
 
 // ============================================================
@@ -134,7 +143,7 @@ function Login({ onIngresar }) {
 // es lo que hay que hacer, no una lista de opciones para elegir.
 // ============================================================
 
-function Home({ usuario, onVerStock, onCerrarSesion }) {
+function Home({ usuario, onVerStock, onRegistrarEntrada, onCerrarSesion }) {
   const [resumen, setResumen] = useState(null); // { criticos, porPedir } | 'error' | null (cargando)
 
   const puedeVerAlmacen = usuario.rol === 'almacen' || usuario.rol === 'jefe_administrador';
@@ -197,12 +206,23 @@ function Home({ usuario, onVerStock, onCerrarSesion }) {
           </div>
         </div>
 
-        <div style={{ ...estilos.tareaCard, opacity: 0.55, cursor: 'default' }}>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada</div>
-            <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>Próximamente</div>
+        {puedeVerAlmacen ? (
+          <button onClick={onRegistrarEntrada} style={estilos.tareaCard}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada</div>
+              <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                Cuando llega mercadería de un proveedor
+              </div>
+            </div>
+          </button>
+        ) : (
+          <div style={{ ...estilos.tareaCard, opacity: 0.55, cursor: 'default' }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada</div>
+              <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>Próximamente</div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </main>
   );
@@ -342,6 +362,260 @@ function formatoNumero(v) {
 }
 
 // ============================================================
+// REGISTRAR ENTRADA — un paso a la vez: buscar producto,
+// completar los datos, confirmar. Sin texto libre salvo lo opcional.
+// ============================================================
+
+function Entrada({ usuario, onVolver, onCerrarSesion }) {
+  const [paso, setPaso] = useState('cargando'); // cargando | buscar | detalle | guardando | exito | error
+  const [mensajeError, setMensajeError] = useState('');
+  const [productos, setProductos] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
+  const [razonesSociales, setRazonesSociales] = useState([]);
+  const [busqueda, setBusqueda] = useState('');
+  const [productoElegido, setProductoElegido] = useState(null);
+
+  const [cantidad, setCantidad] = useState('');
+  const [precio, setPrecio] = useState('');
+  const [proveedorId, setProveedorId] = useState('');
+  const [razonSocialId, setRazonSocialId] = useState('');
+  const [comprobante, setComprobante] = useState('');
+
+  const [resultado, setResultado] = useState(null); // { subio, precioAnterior }
+
+  useEffect(() => {
+    if (!supabase) {
+      setMensajeError('Falta configurar la conexión con la base de datos.');
+      setPaso('error');
+      return;
+    }
+
+    async function cargar() {
+      const [rProductos, rProveedores, rRazones] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, unidad_inventario, precio_bruto_actual, proveedor_principal_id')
+          .eq('activo', true)
+          .order('nombre'),
+        supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
+        supabase.from('razones_sociales').select('id, nombre').eq('activo', true).order('nombre'),
+      ]);
+
+      if (rProductos.error || rProveedores.error || rRazones.error) {
+        setMensajeError((rProductos.error || rProveedores.error || rRazones.error).message);
+        setPaso('error');
+        return;
+      }
+
+      setProductos(rProductos.data || []);
+      setProveedores(rProveedores.data || []);
+      setRazonesSociales(rRazones.data || []);
+      setPaso('buscar');
+    }
+
+    cargar();
+  }, []);
+
+  function elegirProducto(p) {
+    setProductoElegido(p);
+    setCantidad('');
+    setPrecio(p.precio_bruto_actual != null ? String(p.precio_bruto_actual) : '');
+    setProveedorId(p.proveedor_principal_id || '');
+    setRazonSocialId('');
+    setComprobante('');
+    setPaso('detalle');
+  }
+
+  function volverABuscar() {
+    setBusqueda('');
+    setProductoElegido(null);
+    setPaso('buscar');
+  }
+
+  async function guardar() {
+    const cantidadNum = Number(cantidad);
+    const precioNum = Number(precio);
+    if (!cantidadNum || cantidadNum <= 0 || Number.isNaN(precioNum) || precioNum < 0) return;
+
+    setPaso('guardando');
+
+    const { data, error } = await supabase.rpc('registrar_entrada', {
+      p_producto_id: productoElegido.id,
+      p_cantidad: cantidadNum,
+      p_precio_unitario: precioNum,
+      p_proveedor_id: proveedorId || null,
+      p_razon_social_id: razonSocialId || null,
+      p_nro_comprobante: comprobante || null,
+      p_usuario_id: usuario?.id || null,
+    });
+
+    if (error || !data || data.length === 0) {
+      setMensajeError(error ? error.message : 'No se pudo guardar la entrada.');
+      setPaso('error');
+      return;
+    }
+
+    setResultado({ subio: data[0].subio, precioAnterior: data[0].precio_anterior });
+    setPaso('exito');
+  }
+
+  const unidad = productoElegido ? ETIQUETA_UNIDAD[productoElegido.unidad_inventario] || productoElegido.unidad_inventario : '';
+
+  const resultadosBusqueda =
+    busqueda.trim().length === 0
+      ? []
+      : productos
+          .filter((p) => p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
+          .slice(0, 8);
+
+  return (
+    <main style={estilos.contenedor}>
+      <div style={{ ...estilos.tarjeta, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <button onClick={paso === 'detalle' ? volverABuscar : onVolver} style={estilos.enlace}>
+            ← Volver
+          </button>
+          <button onClick={onCerrarSesion} style={estilos.enlace}>
+            Cerrar sesión
+          </button>
+        </div>
+        <h1 style={{ ...estilos.titulo, textAlign: 'left' }}>Registrar entrada</h1>
+
+        {paso === 'cargando' && <p>Cargando productos...</p>}
+
+        {paso === 'error' && (
+          <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
+            <strong>Algo no funcionó.</strong>
+            <p style={{ marginBottom: 8 }}>{mensajeError}</p>
+            <button onClick={() => setPaso('buscar')} style={estilos.enlace}>
+              Intentar de nuevo
+            </button>
+          </div>
+        )}
+
+        {paso === 'buscar' && (
+          <>
+            <p style={{ color: '#7A6F63', marginTop: 0, textAlign: 'left' }}>
+              Paso 1 de 2 · Busca el producto que llegó
+            </p>
+            <input
+              autoFocus
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Escribe el nombre del producto..."
+              style={estilos.input}
+            />
+            {resultadosBusqueda.map((p) => (
+              <button key={p.id} onClick={() => elegirProducto(p)} style={estilos.opcionCard}>
+                {p.nombre}
+              </button>
+            ))}
+            {busqueda.trim().length > 0 && resultadosBusqueda.length === 0 && (
+              <p style={{ color: '#7A6F63' }}>No se encontró ningún producto con ese nombre.</p>
+            )}
+          </>
+        )}
+
+        {(paso === 'detalle' || paso === 'guardando') && productoElegido && (
+          <>
+            <p style={{ color: '#7A6F63', marginTop: 0, textAlign: 'left' }}>
+              Paso 2 de 2 · {productoElegido.nombre}
+            </p>
+
+            <label style={estilos.etiquetaCampo}>Cantidad que llegó ({unidad})</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              placeholder="0"
+              style={estilos.input}
+            />
+
+            <label style={estilos.etiquetaCampo}>Precio pagado por {unidad === 'un' ? 'unidad' : unidad}</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={precio}
+              onChange={(e) => setPrecio(e.target.value)}
+              placeholder="0.00"
+              style={estilos.input}
+            />
+
+            <label style={estilos.etiquetaCampo}>Proveedor</label>
+            <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)} style={estilos.input}>
+              <option value="">(sin especificar)</option>
+              {proveedores.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  {pr.nombre}
+                </option>
+              ))}
+            </select>
+
+            <label style={estilos.etiquetaCampo}>Razón social</label>
+            <select value={razonSocialId} onChange={(e) => setRazonSocialId(e.target.value)} style={estilos.input}>
+              <option value="">(sin especificar)</option>
+              {razonesSociales.map((rs) => (
+                <option key={rs.id} value={rs.id}>
+                  {rs.nombre}
+                </option>
+              ))}
+            </select>
+
+            <label style={estilos.etiquetaCampo}>Número de comprobante (opcional)</label>
+            <input
+              value={comprobante}
+              onChange={(e) => setComprobante(e.target.value)}
+              placeholder="F001-000123"
+              style={estilos.input}
+            />
+
+            <button
+              onClick={guardar}
+              disabled={paso === 'guardando' || !cantidad || Number(cantidad) <= 0 || precio === ''}
+              style={{
+                ...estilos.boton,
+                marginTop: 12,
+                opacity: paso === 'guardando' || !cantidad || Number(cantidad) <= 0 || precio === '' ? 0.5 : 1,
+              }}
+            >
+              {paso === 'guardando' ? 'Guardando...' : 'Guardar entrada'}
+            </button>
+          </>
+        )}
+
+        {paso === 'exito' && productoElegido && (
+          <>
+            <div style={{ background: '#EAF6EC', padding: 16, borderRadius: 8, color: '#1E5C2C', marginBottom: 12, textAlign: 'left' }}>
+              <strong>Entrada registrada.</strong>
+              <p style={{ marginBottom: 0 }}>
+                {formatoNumero(cantidad)} {unidad} de {productoElegido.nombre}.
+              </p>
+            </div>
+
+            {resultado?.subio && (
+              <div style={{ background: '#FDF3E3', padding: 16, borderRadius: 8, color: '#7A5A16', marginBottom: 12, textAlign: 'left' }}>
+                <strong>El precio subió</strong>
+                <p style={{ marginBottom: 0 }}>
+                  Antes: S/ {formatoNumero(resultado.precioAnterior)} · Ahora: S/ {formatoNumero(precio)}
+                </p>
+              </div>
+            )}
+
+            <button onClick={volverABuscar} style={estilos.boton}>
+              Registrar otra entrada
+            </button>
+            <button onClick={onVolver} style={{ ...estilos.enlace, marginTop: 14 }}>
+              Volver al inicio
+            </button>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// ============================================================
 // ESTILOS
 // ============================================================
 
@@ -370,4 +644,28 @@ const estilos = {
     textAlign: 'left',
   },
   badge: { color: '#fff', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 999, whiteSpace: 'nowrap' },
+  input: {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '12px 14px',
+    fontSize: 16,
+    borderRadius: 10,
+    border: '1px solid #E7DDD3',
+    background: '#fff',
+    color: '#2B2320',
+    marginBottom: 12,
+  },
+  etiquetaCampo: { display: 'block', textAlign: 'left', fontSize: 13, color: '#7A6F63', marginBottom: 4 },
+  opcionCard: {
+    width: '100%',
+    textAlign: 'left',
+    padding: '12px 14px',
+    marginBottom: 8,
+    borderRadius: 10,
+    border: '1px solid #E7DDD3',
+    background: '#fff',
+    color: '#2B2320',
+    fontSize: 15,
+    cursor: 'pointer',
+  },
 };
