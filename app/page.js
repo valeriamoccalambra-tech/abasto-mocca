@@ -12,8 +12,9 @@ const ETIQUETA_ROL = {
 const ETIQUETA_UNIDAD = { kg: 'kg', litro: 'L', unidad: 'un' };
 
 export default function App() {
-  const [pantalla, setPantalla] = useState('cargando'); // cargando | login | home | stock
+  const [pantalla, setPantalla] = useState('cargando'); // cargando | login | home | stock | ...
   const [usuario, setUsuario] = useState(null);
+  const [ordenSeleccionada, setOrdenSeleccionada] = useState(null);
 
   useEffect(() => {
     try {
@@ -47,11 +48,38 @@ export default function App() {
     return <Stock onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
   if (pantalla === 'entrada')
     return <Entrada usuario={usuario} onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
+  if (pantalla === 'proveedores')
+    return <Proveedores onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
+  if (pantalla === 'orden_nueva')
+    return <NuevaOrden usuario={usuario} onVolver={() => setPantalla('home')} onCerrarSesion={cerrarSesion} />;
+  if (pantalla === 'ordenes_pendientes')
+    return (
+      <OrdenesPendientes
+        onVolver={() => setPantalla('home')}
+        onCerrarSesion={cerrarSesion}
+        onAbrirOrden={(id) => {
+          setOrdenSeleccionada(id);
+          setPantalla('recibir_orden');
+        }}
+      />
+    );
+  if (pantalla === 'recibir_orden')
+    return (
+      <RecibirOrden
+        usuario={usuario}
+        ordenId={ordenSeleccionada}
+        onVolver={() => setPantalla('ordenes_pendientes')}
+        onCerrarSesion={cerrarSesion}
+      />
+    );
   return (
     <Home
       usuario={usuario}
       onVerStock={() => setPantalla('stock')}
       onRegistrarEntrada={() => setPantalla('entrada')}
+      onProveedores={() => setPantalla('proveedores')}
+      onNuevaOrden={() => setPantalla('orden_nueva')}
+      onOrdenesPendientes={() => setPantalla('ordenes_pendientes')}
       onCerrarSesion={cerrarSesion}
     />
   );
@@ -143,8 +171,17 @@ function Login({ onIngresar }) {
 // es lo que hay que hacer, no una lista de opciones para elegir.
 // ============================================================
 
-function Home({ usuario, onVerStock, onRegistrarEntrada, onCerrarSesion }) {
+function Home({
+  usuario,
+  onVerStock,
+  onRegistrarEntrada,
+  onProveedores,
+  onNuevaOrden,
+  onOrdenesPendientes,
+  onCerrarSesion,
+}) {
   const [resumen, setResumen] = useState(null); // { criticos, porPedir } | 'error' | null (cargando)
+  const [ordenesPendientes, setOrdenesPendientes] = useState(null); // numero | 'error' | null (cargando)
 
   const puedeVerAlmacen = usuario.rol === 'almacen' || usuario.rol === 'jefe_administrador';
 
@@ -162,7 +199,17 @@ function Home({ usuario, onVerStock, onRegistrarEntrada, onCerrarSesion }) {
       setResumen({ criticos, porPedir });
     }
 
+    async function cargarOrdenes() {
+      const { data, error } = await supabase.from('vw_ordenes_pendientes').select('orden_id');
+      if (error) {
+        setOrdenesPendientes('error');
+        return;
+      }
+      setOrdenesPendientes(data.length);
+    }
+
     cargar();
+    cargarOrdenes();
   }, [puedeVerAlmacen]);
 
   return (
@@ -199,6 +246,20 @@ function Home({ usuario, onVerStock, onRegistrarEntrada, onCerrarSesion }) {
           </p>
         )}
 
+        {puedeVerAlmacen && (
+          <button onClick={onOrdenesPendientes} style={estilos.tareaCard}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 17 }}>Recibir mercadería</div>
+              <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                Órdenes de compra a la espera de llegar
+              </div>
+            </div>
+            {ordenesPendientes !== null && ordenesPendientes !== 'error' && ordenesPendientes > 0 && (
+              <span style={{ ...estilos.badge, background: '#3E7A49' }}>{ordenesPendientes}</span>
+            )}
+          </button>
+        )}
+
         <div style={{ ...estilos.tareaCard, opacity: 0.55, cursor: 'default' }}>
           <div>
             <div style={{ fontWeight: 600, fontSize: 17 }}>Pedidos</div>
@@ -206,22 +267,35 @@ function Home({ usuario, onVerStock, onRegistrarEntrada, onCerrarSesion }) {
           </div>
         </div>
 
-        {puedeVerAlmacen ? (
-          <button onClick={onRegistrarEntrada} style={estilos.tareaCard}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada</div>
-              <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
-                Cuando llega mercadería de un proveedor
+        {puedeVerAlmacen && (
+          <>
+            <button onClick={onNuevaOrden} style={{ ...estilos.tareaCard, marginTop: 24 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 17 }}>Nueva orden de compra</div>
+                <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                  Registrar qué se pidió a un proveedor
+                </div>
               </div>
-            </div>
-          </button>
-        ) : (
-          <div style={{ ...estilos.tareaCard, opacity: 0.55, cursor: 'default' }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada</div>
-              <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>Próximamente</div>
-            </div>
-          </div>
+            </button>
+
+            <button onClick={onRegistrarEntrada} style={estilos.tareaCard}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 17 }}>Registrar entrada suelta</div>
+                <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                  Cuando llega algo sin una orden de compra
+                </div>
+              </div>
+            </button>
+
+            <button onClick={onProveedores} style={estilos.tareaCard}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 17 }}>Proveedores</div>
+                <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                  Quién concentra más productos y cuánto le compramos
+                </div>
+              </div>
+            </button>
+          </>
         )}
       </div>
     </main>
@@ -361,6 +435,36 @@ function formatoNumero(v) {
   return n.toLocaleString('es-PE', { maximumFractionDigits: 1 });
 }
 
+// Aviso de si el precio subió, bajó o quedó igual respecto a la última
+// compra registrada de ese producto. Se usa tanto en Registrar entrada
+// como al recibir una orden de compra.
+function MensajePrecio({ comparacion, precioAnterior, precioNuevo }) {
+  if (comparacion === 'sin_dato') {
+    return (
+      <div style={{ background: '#EFEBE6', padding: 16, borderRadius: 8, color: '#5C5248', marginBottom: 12, textAlign: 'left' }}>
+        Primera vez que se registra un precio para este producto.
+      </div>
+    );
+  }
+
+  const info = {
+    subio: { bg: '#FDF3E3', color: '#7A5A16', texto: 'El precio subió' },
+    bajo: { bg: '#EAF6EC', color: '#1E5C2C', texto: 'El precio bajó' },
+    igual: { bg: '#EFEBE6', color: '#5C5248', texto: 'El precio quedó igual' },
+  }[comparacion];
+
+  if (!info) return null;
+
+  return (
+    <div style={{ background: info.bg, padding: 16, borderRadius: 8, color: info.color, marginBottom: 12, textAlign: 'left' }}>
+      <strong>{info.texto}</strong>
+      <p style={{ marginBottom: 0 }}>
+        Antes: S/ {formatoNumero(precioAnterior)} · Ahora: S/ {formatoNumero(precioNuevo)}
+      </p>
+    </div>
+  );
+}
+
 // ============================================================
 // REGISTRAR ENTRADA — un paso a la vez: buscar producto,
 // completar los datos, confirmar. Sin texto libre salvo lo opcional.
@@ -381,7 +485,7 @@ function Entrada({ usuario, onVolver, onCerrarSesion }) {
   const [razonSocialId, setRazonSocialId] = useState('');
   const [comprobante, setComprobante] = useState('');
 
-  const [resultado, setResultado] = useState(null); // { subio, precioAnterior }
+  const [resultado, setResultado] = useState(null); // { comparacion, precioAnterior }
 
   useEffect(() => {
     if (!supabase) {
@@ -455,7 +559,7 @@ function Entrada({ usuario, onVolver, onCerrarSesion }) {
       return;
     }
 
-    setResultado({ subio: data[0].subio, precioAnterior: data[0].precio_anterior });
+    setResultado({ comparacion: data[0].comparacion, precioAnterior: data[0].precio_anterior });
     setPaso('exito');
   }
 
@@ -593,13 +697,8 @@ function Entrada({ usuario, onVolver, onCerrarSesion }) {
               </p>
             </div>
 
-            {resultado?.subio && (
-              <div style={{ background: '#FDF3E3', padding: 16, borderRadius: 8, color: '#7A5A16', marginBottom: 12, textAlign: 'left' }}>
-                <strong>El precio subió</strong>
-                <p style={{ marginBottom: 0 }}>
-                  Antes: S/ {formatoNumero(resultado.precioAnterior)} · Ahora: S/ {formatoNumero(precio)}
-                </p>
-              </div>
+            {resultado && (
+              <MensajePrecio comparacion={resultado.comparacion} precioAnterior={resultado.precioAnterior} precioNuevo={precio} />
             )}
 
             <button onClick={volverABuscar} style={estilos.boton}>
@@ -612,6 +711,718 @@ function Entrada({ usuario, onVolver, onCerrarSesion }) {
         )}
       </div>
     </main>
+  );
+}
+
+// ============================================================
+// PROVEEDORES — qué proveedor concentra más productos (poder de
+// negociación) y cuánto se le ha comprado en total.
+// ============================================================
+
+function Proveedores({ onVolver, onCerrarSesion }) {
+  const [estado, setEstado] = useState('cargando'); // cargando | ok | error
+  const [proveedores, setProveedores] = useState([]);
+  const [mensajeError, setMensajeError] = useState('');
+
+  useEffect(() => {
+    if (!supabase) {
+      setMensajeError('Falta configurar la conexión con la base de datos.');
+      setEstado('error');
+      return;
+    }
+
+    async function cargar() {
+      const { data, error } = await supabase
+        .from('vw_proveedores_concentracion')
+        .select('proveedor_id, nombre, cantidad_productos, total_comprado');
+
+      if (error) {
+        setMensajeError(error.message);
+        setEstado('error');
+        return;
+      }
+
+      setProveedores(data || []);
+      setEstado('ok');
+    }
+
+    cargar();
+  }, []);
+
+  const maxProductos = Math.max(1, ...proveedores.map((p) => p.cantidad_productos));
+
+  return (
+    <main style={estilos.contenedor}>
+      <div style={{ ...estilos.tarjeta, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <button onClick={onVolver} style={estilos.enlace}>
+            ← Volver
+          </button>
+          <button onClick={onCerrarSesion} style={estilos.enlace}>
+            Cerrar sesión
+          </button>
+        </div>
+        <h1 style={{ ...estilos.titulo, textAlign: 'left' }}>Proveedores</h1>
+        <p style={{ color: '#7A6F63', marginTop: 0, textAlign: 'left', fontSize: 13 }}>
+          Ordenados por cuántos productos les compras. Mientras más productos dependen de un mismo
+          proveedor, menos margen tienes para negociar precio con él.
+        </p>
+
+        {estado === 'cargando' && <p>Cargando...</p>}
+
+        {estado === 'error' && (
+          <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
+            <strong>No se pudo cargar.</strong>
+            <p style={{ marginBottom: 0 }}>{mensajeError}</p>
+          </div>
+        )}
+
+        {estado === 'ok' &&
+          proveedores.map((p) => (
+            <div key={p.proveedor_id} style={{ ...estilos.opcionCard, cursor: 'default' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                <span>{p.nombre}</span>
+                <span>
+                  {p.cantidad_productos} producto{p.cantidad_productos === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div style={{ background: '#F1EAE0', borderRadius: 999, height: 8, marginTop: 8, marginBottom: 6 }}>
+                <div
+                  style={{
+                    width: `${(p.cantidad_productos / maxProductos) * 100}%`,
+                    background: '#C1592B',
+                    height: 8,
+                    borderRadius: 999,
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 13, color: '#7A6F63' }}>Comprado en total: S/ {formatoNumero(p.total_comprado)}</div>
+            </div>
+          ))}
+      </div>
+    </main>
+  );
+}
+
+// ============================================================
+// NUEVA ORDEN DE COMPRA — qué se pidió a un proveedor, antes de
+// que llegue la mercadería.
+// ============================================================
+
+function NuevaOrden({ usuario, onVolver, onCerrarSesion }) {
+  const [paso, setPaso] = useState('cargando'); // cargando | form | guardando | exito | error
+  const [mensajeError, setMensajeError] = useState('');
+  const [productos, setProductos] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
+  const [razonesSociales, setRazonesSociales] = useState([]);
+
+  const [proveedorId, setProveedorId] = useState('');
+  const [razonSocialId, setRazonSocialId] = useState('');
+  const [lineas, setLineas] = useState([]); // { producto_id, nombre, unidad, cantidad }
+
+  const [busqueda, setBusqueda] = useState('');
+  const [productoParaAgregar, setProductoParaAgregar] = useState(null);
+  const [cantidadParaAgregar, setCantidadParaAgregar] = useState('');
+
+  useEffect(() => {
+    if (!supabase) {
+      setMensajeError('Falta configurar la conexión con la base de datos.');
+      setPaso('error');
+      return;
+    }
+
+    async function cargar() {
+      const [rProductos, rProveedores, rRazones] = await Promise.all([
+        supabase
+          .from('productos')
+          .select('id, nombre, unidad_inventario, proveedor_principal_id')
+          .eq('activo', true)
+          .order('nombre'),
+        supabase.from('proveedores').select('id, nombre').eq('activo', true).order('nombre'),
+        supabase.from('razones_sociales').select('id, nombre').eq('activo', true).order('nombre'),
+      ]);
+
+      if (rProductos.error || rProveedores.error || rRazones.error) {
+        setMensajeError((rProductos.error || rProveedores.error || rRazones.error).message);
+        setPaso('error');
+        return;
+      }
+
+      setProductos(rProductos.data || []);
+      setProveedores(rProveedores.data || []);
+      setRazonesSociales(rRazones.data || []);
+      setPaso('form');
+    }
+
+    cargar();
+  }, []);
+
+  const resultadosBusqueda =
+    busqueda.trim().length === 0
+      ? []
+      : productos
+          .filter((p) => p.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
+          .filter((p) => !lineas.some((l) => l.producto_id === p.id))
+          .slice(0, 8);
+
+  function confirmarLinea() {
+    const cantidadNum = Number(cantidadParaAgregar);
+    if (!cantidadNum || cantidadNum <= 0) return;
+    setLineas([
+      ...lineas,
+      {
+        producto_id: productoParaAgregar.id,
+        nombre: productoParaAgregar.nombre,
+        unidad: productoParaAgregar.unidad_inventario,
+        cantidad: cantidadNum,
+      },
+    ]);
+    setProductoParaAgregar(null);
+    setCantidadParaAgregar('');
+    setBusqueda('');
+  }
+
+  function quitarLinea(producto_id) {
+    setLineas(lineas.filter((l) => l.producto_id !== producto_id));
+  }
+
+  async function crearOrden() {
+    if (!proveedorId || lineas.length === 0) return;
+    setPaso('guardando');
+
+    const { error } = await supabase.rpc('crear_orden_compra', {
+      p_proveedor_id: proveedorId,
+      p_razon_social_id: razonSocialId || null,
+      p_lineas: lineas.map((l) => ({ producto_id: l.producto_id, cantidad: l.cantidad })),
+      p_usuario_id: usuario?.id || null,
+    });
+
+    if (error) {
+      setMensajeError(error.message);
+      setPaso('error');
+      return;
+    }
+
+    setPaso('exito');
+  }
+
+  function empezarOtra() {
+    setProveedorId('');
+    setRazonSocialId('');
+    setLineas([]);
+    setBusqueda('');
+    setProductoParaAgregar(null);
+    setPaso('form');
+  }
+
+  return (
+    <main style={estilos.contenedor}>
+      <div style={{ ...estilos.tarjeta, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <button onClick={onVolver} style={estilos.enlace}>
+            ← Volver
+          </button>
+          <button onClick={onCerrarSesion} style={estilos.enlace}>
+            Cerrar sesión
+          </button>
+        </div>
+        <h1 style={{ ...estilos.titulo, textAlign: 'left' }}>Nueva orden de compra</h1>
+
+        {paso === 'cargando' && <p>Cargando...</p>}
+
+        {paso === 'error' && (
+          <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
+            <strong>Algo no funcionó.</strong>
+            <p style={{ marginBottom: 8 }}>{mensajeError}</p>
+            <button onClick={() => setPaso('form')} style={estilos.enlace}>
+              Intentar de nuevo
+            </button>
+          </div>
+        )}
+
+        {(paso === 'form' || paso === 'guardando') && (
+          <>
+            <label style={estilos.etiquetaCampo}>Proveedor</label>
+            <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)} style={estilos.input}>
+              <option value="">Elige un proveedor...</option>
+              {proveedores.map((pr) => (
+                <option key={pr.id} value={pr.id}>
+                  {pr.nombre}
+                </option>
+              ))}
+            </select>
+
+            <label style={estilos.etiquetaCampo}>Razón social</label>
+            <select value={razonSocialId} onChange={(e) => setRazonSocialId(e.target.value)} style={estilos.input}>
+              <option value="">(sin especificar)</option>
+              {razonesSociales.map((rs) => (
+                <option key={rs.id} value={rs.id}>
+                  {rs.nombre}
+                </option>
+              ))}
+            </select>
+
+            <label style={estilos.etiquetaCampo}>Productos pedidos</label>
+
+            {lineas.map((l) => (
+              <div
+                key={l.producto_id}
+                style={{ ...estilos.opcionCard, cursor: 'default', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              >
+                <span>
+                  {l.nombre} — {formatoNumero(l.cantidad)} {ETIQUETA_UNIDAD[l.unidad] || l.unidad}
+                </span>
+                <button onClick={() => quitarLinea(l.producto_id)} style={{ ...estilos.enlace, fontSize: 18 }}>
+                  ×
+                </button>
+              </div>
+            ))}
+
+            {productoParaAgregar ? (
+              <div style={{ ...estilos.opcionCard, cursor: 'default' }}>
+                <div style={{ marginBottom: 8 }}>{productoParaAgregar.nombre}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    autoFocus
+                    type="number"
+                    inputMode="decimal"
+                    value={cantidadParaAgregar}
+                    onChange={(e) => setCantidadParaAgregar(e.target.value)}
+                    placeholder={`Cantidad (${ETIQUETA_UNIDAD[productoParaAgregar.unidad_inventario] || productoParaAgregar.unidad_inventario})`}
+                    style={{ ...estilos.input, marginBottom: 0 }}
+                  />
+                  <button
+                    onClick={confirmarLinea}
+                    disabled={!cantidadParaAgregar || Number(cantidadParaAgregar) <= 0}
+                    style={{ ...estilos.boton, width: 'auto', padding: '0 16px' }}
+                  >
+                    Agregar
+                  </button>
+                </div>
+                <button onClick={() => setProductoParaAgregar(null)} style={{ ...estilos.enlace, marginTop: 8 }}>
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Busca un producto para agregar..."
+                  style={estilos.input}
+                />
+                {resultadosBusqueda.map((p) => (
+                  <button key={p.id} onClick={() => setProductoParaAgregar(p)} style={estilos.opcionCard}>
+                    {p.nombre}
+                  </button>
+                ))}
+              </>
+            )}
+
+            <button
+              onClick={crearOrden}
+              disabled={paso === 'guardando' || !proveedorId || lineas.length === 0}
+              style={{
+                ...estilos.boton,
+                marginTop: 16,
+                opacity: paso === 'guardando' || !proveedorId || lineas.length === 0 ? 0.5 : 1,
+              }}
+            >
+              {paso === 'guardando' ? 'Creando...' : `Crear orden (${lineas.length} producto${lineas.length === 1 ? '' : 's'})`}
+            </button>
+          </>
+        )}
+
+        {paso === 'exito' && (
+          <>
+            <div style={{ background: '#EAF6EC', padding: 16, borderRadius: 8, color: '#1E5C2C', marginBottom: 12, textAlign: 'left' }}>
+              <strong>Orden creada.</strong>
+              <p style={{ marginBottom: 0 }}>
+                Cuando llegue la mercadería, la recibes desde "Recibir mercadería" en Inicio.
+              </p>
+            </div>
+            <button onClick={empezarOtra} style={estilos.boton}>
+              Crear otra orden
+            </button>
+            <button onClick={onVolver} style={{ ...estilos.enlace, marginTop: 14 }}>
+              Volver al inicio
+            </button>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// ============================================================
+// ÓRDENES PENDIENTES — lista de órdenes de compra por recibir.
+// ============================================================
+
+function OrdenesPendientes({ onVolver, onCerrarSesion, onAbrirOrden }) {
+  const [estado, setEstado] = useState('cargando'); // cargando | ok | error
+  const [ordenes, setOrdenes] = useState([]);
+  const [mensajeError, setMensajeError] = useState('');
+
+  useEffect(() => {
+    if (!supabase) {
+      setMensajeError('Falta configurar la conexión con la base de datos.');
+      setEstado('error');
+      return;
+    }
+
+    async function cargar() {
+      const { data, error } = await supabase
+        .from('vw_ordenes_pendientes')
+        .select('orden_id, estado, fecha_pedido, proveedor_nombre, razon_social_nombre, lineas_pendientes, lineas_totales');
+
+      if (error) {
+        setMensajeError(error.message);
+        setEstado('error');
+        return;
+      }
+
+      setOrdenes(data || []);
+      setEstado('ok');
+    }
+
+    cargar();
+  }, []);
+
+  return (
+    <main style={estilos.contenedor}>
+      <div style={{ ...estilos.tarjeta, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <button onClick={onVolver} style={estilos.enlace}>
+            ← Volver
+          </button>
+          <button onClick={onCerrarSesion} style={estilos.enlace}>
+            Cerrar sesión
+          </button>
+        </div>
+        <h1 style={{ ...estilos.titulo, textAlign: 'left' }}>Recibir mercadería</h1>
+
+        {estado === 'cargando' && <p>Cargando...</p>}
+
+        {estado === 'error' && (
+          <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
+            <strong>No se pudo cargar.</strong>
+            <p style={{ marginBottom: 0 }}>{mensajeError}</p>
+          </div>
+        )}
+
+        {estado === 'ok' && ordenes.length === 0 && (
+          <div style={{ background: '#EAF6EC', padding: 16, borderRadius: 8, color: '#1E5C2C' }}>
+            No hay órdenes de compra pendientes de recibir.
+          </div>
+        )}
+
+        {estado === 'ok' &&
+          ordenes.map((o) => (
+            <button key={o.orden_id} onClick={() => onAbrirOrden(o.orden_id)} style={estilos.tareaCard}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 17 }}>{o.proveedor_nombre}</div>
+                <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
+                  Pedido el {new Date(o.fecha_pedido).toLocaleDateString('es-PE')} · {o.lineas_totales - o.lineas_pendientes}/
+                  {o.lineas_totales} recibido
+                </div>
+              </div>
+              <span style={{ ...estilos.badge, background: o.estado === 'recibida_parcial' ? '#D9A441' : '#7A6F63' }}>
+                Falta{o.lineas_pendientes === 1 ? '' : 'n'} {o.lineas_pendientes}
+              </span>
+            </button>
+          ))}
+      </div>
+    </main>
+  );
+}
+
+// ============================================================
+// RECIBIR ORDEN — escanear o tocar cada producto que llegó,
+// confirmar cantidad y precio. Se puede recibir de a poco (parcial).
+// ============================================================
+
+function RecibirOrden({ usuario, ordenId, onVolver, onCerrarSesion }) {
+  const [estado, setEstado] = useState('cargando'); // cargando | lista | completada | error
+  const [mensajeError, setMensajeError] = useState('');
+  const [pendientes, setPendientes] = useState([]);
+  const [recibidas, setRecibidas] = useState([]); // { nombre, comparacion, precioAnterior, precioNuevo }
+  const [lineaSeleccionada, setLineaSeleccionada] = useState(null);
+  const [cantidadRecibida, setCantidadRecibida] = useState('');
+  const [precioRecibido, setPrecioRecibido] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  const [escaneando, setEscaneando] = useState(false);
+  const [mensajeEscaner, setMensajeEscaner] = useState('');
+
+  async function cargarPendientes() {
+    const { data, error } = await supabase
+      .from('vw_lineas_pendientes')
+      .select('detalle_id, producto_id, nombre, unidad_inventario, codigo_barras, precio_bruto_actual, cantidad_pedida')
+      .eq('orden_compra_id', ordenId);
+
+    if (error) {
+      setMensajeError(error.message);
+      setEstado('error');
+      return;
+    }
+
+    setPendientes(data || []);
+    setEstado(data.length === 0 ? 'completada' : 'lista');
+  }
+
+  useEffect(() => {
+    if (!supabase || !ordenId) {
+      setMensajeError('Falta configurar la conexión con la base de datos.');
+      setEstado('error');
+      return;
+    }
+    cargarPendientes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordenId]);
+
+  function elegirLinea(l) {
+    setLineaSeleccionada(l);
+    setCantidadRecibida(String(l.cantidad_pedida));
+    setPrecioRecibido(l.precio_bruto_actual != null ? String(l.precio_bruto_actual) : '');
+    setEscaneando(false);
+  }
+
+  async function confirmarLinea() {
+    const cantidadNum = Number(cantidadRecibida);
+    const precioNum = Number(precioRecibido);
+    if (!cantidadNum || cantidadNum <= 0 || Number.isNaN(precioNum) || precioNum < 0) return;
+
+    setGuardando(true);
+    const { data, error } = await supabase.rpc('recibir_linea_orden', {
+      p_detalle_id: lineaSeleccionada.detalle_id,
+      p_cantidad_recibida: cantidadNum,
+      p_precio_unitario: precioNum,
+      p_usuario_id: usuario?.id || null,
+    });
+    setGuardando(false);
+
+    if (error || !data || data.length === 0) {
+      setMensajeError(error ? error.message : 'No se pudo registrar la recepción.');
+      setEstado('error');
+      return;
+    }
+
+    setRecibidas((prev) => [
+      ...prev,
+      {
+        nombre: lineaSeleccionada.nombre,
+        comparacion: data[0].comparacion,
+        precioAnterior: data[0].precio_anterior,
+        precioNuevo: precioNum,
+      },
+    ]);
+    setLineaSeleccionada(null);
+    await cargarPendientes();
+  }
+
+  function alEscanear(codigo) {
+    const encontrada = pendientes.find((l) => l.codigo_barras === codigo);
+    if (!encontrada) {
+      setMensajeEscaner('Ese código no corresponde a ningún producto pendiente de esta orden.');
+      return;
+    }
+    setMensajeEscaner('');
+    elegirLinea(encontrada);
+  }
+
+  return (
+    <main style={estilos.contenedor}>
+      <div style={{ ...estilos.tarjeta, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <button onClick={onVolver} style={estilos.enlace}>
+            ← Volver
+          </button>
+          <button onClick={onCerrarSesion} style={estilos.enlace}>
+            Cerrar sesión
+          </button>
+        </div>
+        <h1 style={{ ...estilos.titulo, textAlign: 'left' }}>Recibir orden</h1>
+
+        {estado === 'cargando' && <p>Cargando...</p>}
+
+        {estado === 'error' && (
+          <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
+            <strong>Algo no funcionó.</strong>
+            <p style={{ marginBottom: 0 }}>{mensajeError}</p>
+          </div>
+        )}
+
+        {estado === 'completada' && (
+          <div style={{ background: '#EAF6EC', padding: 16, borderRadius: 8, color: '#1E5C2C', marginBottom: 12 }}>
+            <strong>Esta orden ya está completa.</strong>
+            <p style={{ marginBottom: 0 }}>Todos los productos pedidos ya fueron recibidos.</p>
+          </div>
+        )}
+
+        {estado === 'lista' && !lineaSeleccionada && (
+          <>
+            {escaneando ? (
+              <EscanerCodigo
+                onDetectado={(codigo) => {
+                  setEscaneando(false);
+                  alEscanear(codigo);
+                }}
+                onCancelar={() => setEscaneando(false)}
+              />
+            ) : (
+              <button
+                onClick={() => {
+                  setMensajeEscaner('');
+                  setEscaneando(true);
+                }}
+                style={{ ...estilos.boton, marginBottom: 16 }}
+              >
+                Escanear código de barras
+              </button>
+            )}
+
+            {mensajeEscaner && <p style={{ color: '#C1592B', fontSize: 14 }}>{mensajeEscaner}</p>}
+
+            <p style={{ color: '#7A6F63', textAlign: 'left', fontSize: 13 }}>O toca un producto de la lista:</p>
+
+            {pendientes.map((l) => (
+              <button key={l.detalle_id} onClick={() => elegirLinea(l)} style={estilos.opcionCard}>
+                {l.nombre} — se pidieron {formatoNumero(l.cantidad_pedida)}{' '}
+                {ETIQUETA_UNIDAD[l.unidad_inventario] || l.unidad_inventario}
+                {!l.codigo_barras && ' (sin código de barras)'}
+              </button>
+            ))}
+          </>
+        )}
+
+        {lineaSeleccionada && (
+          <>
+            <p style={{ color: '#7A6F63', marginTop: 0, textAlign: 'left' }}>{lineaSeleccionada.nombre}</p>
+
+            <label style={estilos.etiquetaCampo}>
+              Cantidad que llegó ({ETIQUETA_UNIDAD[lineaSeleccionada.unidad_inventario] || lineaSeleccionada.unidad_inventario}) — se
+              pidieron {formatoNumero(lineaSeleccionada.cantidad_pedida)}
+            </label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={cantidadRecibida}
+              onChange={(e) => setCantidadRecibida(e.target.value)}
+              style={estilos.input}
+            />
+
+            <label style={estilos.etiquetaCampo}>Precio pagado</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={precioRecibido}
+              onChange={(e) => setPrecioRecibido(e.target.value)}
+              style={estilos.input}
+            />
+
+            <button
+              onClick={confirmarLinea}
+              disabled={guardando || !cantidadRecibida || Number(cantidadRecibida) <= 0 || precioRecibido === ''}
+              style={{
+                ...estilos.boton,
+                opacity: guardando || !cantidadRecibida || Number(cantidadRecibida) <= 0 || precioRecibido === '' ? 0.5 : 1,
+              }}
+            >
+              {guardando ? 'Guardando...' : 'Confirmar'}
+            </button>
+            <button onClick={() => setLineaSeleccionada(null)} style={{ ...estilos.enlace, marginTop: 12 }}>
+              Cancelar
+            </button>
+          </>
+        )}
+
+        {recibidas.length > 0 && (
+          <div style={{ marginTop: 24, textAlign: 'left' }}>
+            <p style={{ fontSize: 13, color: '#7A6F63', fontWeight: 600 }}>Ya recibidos en esta visita:</p>
+            {recibidas.map((r, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 14 }}>{r.nombre}</div>
+                <MensajePrecio comparacion={r.comparacion} precioAnterior={r.precioAnterior} precioNuevo={r.precioNuevo} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {estado === 'completada' && (
+          <button onClick={onVolver} style={{ ...estilos.boton, marginTop: 8 }}>
+            Volver a órdenes
+          </button>
+        )}
+      </div>
+    </main>
+  );
+}
+
+// ============================================================
+// ESCÁNER DE CÓDIGO DE BARRAS — usa la cámara del celular/tablet.
+// Es la parte más nueva y menos probada de todo esto: si la cámara
+// falla por lo que sea, siempre se puede tocar el producto de la
+// lista en vez de escanear.
+// ============================================================
+
+function EscanerCodigo({ onDetectado, onCancelar }) {
+  const [estadoCamara, setEstadoCamara] = useState('iniciando'); // iniciando | activa | error
+  const [mensaje, setMensaje] = useState('');
+
+  useEffect(() => {
+    let scanner = null;
+    let detenido = false;
+
+    async function iniciar() {
+      try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        if (detenido) return;
+
+        scanner = new Html5Qrcode('lector-codigo-barras');
+        await scanner.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 150 } },
+          (textoDecodificado) => {
+            if (detenido) return;
+            detenido = true;
+            scanner
+              .stop()
+              .catch(() => {})
+              .finally(() => onDetectado(textoDecodificado));
+          },
+          () => {
+            // no se detectó nada en este cuadro de video; es normal, se ignora
+          }
+        );
+
+        if (!detenido) setEstadoCamara('activa');
+      } catch (err) {
+        setEstadoCamara('error');
+        setMensaje(
+          'No se pudo abrir la cámara (puede faltar dar el permiso, o el navegador no lo soporta). Toca el producto de la lista en su lugar.'
+        );
+      }
+    }
+
+    iniciar();
+
+    return () => {
+      detenido = true;
+      if (scanner) scanner.stop().catch(() => {});
+    };
+  }, []);
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        id="lector-codigo-barras"
+        style={{ width: '100%', borderRadius: 10, overflow: 'hidden', background: '#000', minHeight: estadoCamara === 'activa' ? undefined : 120 }}
+      />
+      {estadoCamara === 'iniciando' && <p style={{ fontSize: 13, color: '#7A6F63' }}>Abriendo cámara...</p>}
+      {estadoCamara === 'error' && <p style={{ fontSize: 13, color: '#C1592B' }}>{mensaje}</p>}
+      <button onClick={onCancelar} style={{ ...estilos.enlace, marginTop: 8 }}>
+        Cancelar
+      </button>
+    </div>
   );
 }
 
