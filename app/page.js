@@ -2021,7 +2021,7 @@ function PedidosPorAtender({ onVolver, onCerrarSesion, onAbrirPedido }) {
     async function cargar() {
       const { data, error } = await supabase
         .from('vw_pedidos_por_atender')
-        .select('pedido_id, prioridad, estado, creado_en, solicitante_nombre, cantidad_productos');
+        .select('pedido_id, prioridad, estado, creado_en, solicitante_nombre, cantidad_productos, solicitante_area');
 
       if (error) {
         setMensajeError(error.message);
@@ -2070,6 +2070,7 @@ function PedidosPorAtender({ onVolver, onCerrarSesion, onAbrirPedido }) {
               <div>
                 <div style={{ fontWeight: 600, fontSize: 17 }}>
                   {p.solicitante_nombre}
+                  {p.solicitante_area && ` (${p.solicitante_area})`}
                   {p.prioridad === 'urgente' && ' · Urgente'}
                 </div>
                 <div style={{ fontSize: 13, color: '#7A6F63', marginTop: 2 }}>
