@@ -1,97 +1,123 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { supabase } from './lib/supabaseClient';
 
-export default function Home() {
-  const [estado, setEstado] = useState('cargando');
-  const [productos, setProductos] = useState([]);
-  const [totalProductos, setTotalProductos] = useState(null);
-  const [mensajeError, setMensajeError] = useState('');
+export default function Login() {
+  const [pin, setPin] = useState('');
+  const [estado, setEstado] = useState('idle');
+  const [usuario, setUsuario] = useState(null);
 
-  useEffect(() => {
-    if (!supabase) {
-      setEstado('sin-configurar');
+  function agregarDigito(d) {
+    if (pin.length >= 4 || estado === 'verificando') return;
+    setEstado('idle');
+    setPin(pin + d);
+  }
+
+  function borrar() {
+    setPin(pin.slice(0, -1));
+    setEstado('idle');
+  }
+
+  async function ingresar() {
+    if (pin.length !== 4 || !supabase) return;
+    setEstado('verificando');
+
+    const { data, error } = await supabase.rpc('login_con_pin', { pin_ingresado: pin });
+
+    if (error || !data || data.length === 0) {
+      setEstado('error');
+      setPin('');
       return;
     }
 
-    async function cargar() {
-      const { count, error: errorConteo } = await supabase
-        .from('productos')
-        .select('*', { count: 'exact', head: true });
+    const user = data[0];
+    localStorage.setItem('abasto_usuario', JSON.stringify(user));
+    setUsuario(user);
+    setEstado('ok');
+  }
 
-      const { data, error: errorLista } = await supabase
-        .from('productos')
-        .select('nombre, unidad_inventario, precio_bruto_actual')
-        .order('nombre')
-        .limit(10);
-
-      if (errorConteo || errorLista) {
-        setMensajeError((errorConteo || errorLista).message);
-        setEstado('error');
-        return;
-      }
-
-      setTotalProductos(count);
-      setProductos(data || []);
-      setEstado('ok');
-    }
-
-    cargar();
-  }, []);
-
-  return (
-    <main style={{ maxWidth: 640, margin: '0 auto', padding: '32px 20px' }}>
-      <h1 style={{ fontSize: 24, marginBottom: 4 }}>Abasto Mocca</h1>
-      <p style={{ color: '#7A6F63', marginTop: 0 }}>
-        Página de prueba: confirma que la aplicación ya está conectada a tu base de datos real.
-      </p>
-
-      {estado === 'cargando' && <p>Conectando con la base de datos...</p>}
-
-      {estado === 'sin-configurar' && (
-        <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
-          <strong>Todavía falta conectar la base de datos.</strong>
-          <p>
-            Faltan las variables <code>NEXT_PUBLIC_SUPABASE_URL</code> y{' '}
-            <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>. Configúralas en Vercel (Project Settings
-            → Environment Variables) con los datos de tu proyecto en Supabase (Project Settings
-            → API) y vuelve a desplegar.
+  if (estado === 'ok' && usuario) {
+    return (
+      <main style={estilos.contenedor}>
+        <div style={estilos.tarjeta}>
+          <h1 style={estilos.titulo}>¡Hola, {usuario.nombre}!</h1>
+          <p style={{ color: '#7A6F63' }}>
+            Entraste como <strong>{etiquetaRol(usuario.rol)}</strong>.
+          </p>
+          <p style={{ fontSize: 13, color: '#A79C8E' }}>
+            (Las pantallas de cada rol vienen en el siguiente paso)
           </p>
         </div>
-      )}
+      </main>
+    );
+  }
 
-      {estado === 'error' && (
-        <div style={{ background: '#FDECEA', padding: 16, borderRadius: 8, color: '#7A2E22' }}>
-          <strong>No se pudo conectar con Supabase.</strong>
-          <p>{mensajeError}</p>
-        </div>
-      )}
+  return (
+    <main style={estilos.contenedor}>
+      <div style={estilos.tarjeta}>
+        <h1 style={estilos.titulo}>Abasto Mocca</h1>
+        <p style={{ color: '#7A6F63', marginTop: 0 }}>Ingresa tu PIN de 4 dígitos</p>
 
-      {estado === 'ok' && (
-        <div style={{ background: '#EAF6EC', padding: 16, borderRadius: 8, color: '#1E5C2C' }}>
-          <strong>¡Conectado! Se encontraron {totalProductos} productos en tu inventario.</strong>
-          <table style={{ width: '100%', marginTop: 16, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '1px solid #C7DFC9' }}>
-                <th style={{ padding: '6px 4px' }}>Producto</th>
-                <th style={{ padding: '6px 4px' }}>Unidad</th>
-                <th style={{ padding: '6px 4px' }}>Precio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {productos.map((p) => (
-                <tr key={p.nombre} style={{ borderBottom: '1px solid #DCEEDD' }}>
-                  <td style={{ padding: '6px 4px' }}>{p.nombre}</td>
-                  <td style={{ padding: '6px 4px' }}>{p.unidad_inventario}</td>
-                  <td style={{ padding: '6px 4px' }}>S/ {p.precio_bruto_actual}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p style={{ fontSize: 13, color: '#3E7A49' }}>(mostrando los primeros 10, ordenados por nombre)</p>
+        <div style={estilos.puntos}>
+          {[0, 1, 2, 3].map((i) => (
+            <span
+              key={i}
+              style={{ ...estilos.punto, background: i < pin.length ? '#C1592B' : '#E7DDD3' }}
+            />
+          ))}
         </div>
-      )}
+
+        {estado === 'error' && (
+          <p style={{ color: '#C1592B', fontWeight: 600 }}>PIN incorrecto, intenta de nuevo</p>
+        )}
+
+        <div style={estilos.teclado}>
+          {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '←'].map((tecla, i) =>
+            tecla === '' ? (
+              <div key={i} />
+            ) : (
+              <button
+                key={i}
+                onClick={() => (tecla === '←' ? borrar() : agregarDigito(tecla))}
+                style={estilos.tecla}
+              >
+                {tecla}
+              </button>
+            )
+          )}
+        </div>
+
+        <button
+          onClick={ingresar}
+          disabled={pin.length !== 4 || estado === 'verificando'}
+          style={{
+            ...estilos.boton,
+            opacity: pin.length === 4 && estado !== 'verificando' ? 1 : 0.5,
+          }}
+        >
+          {estado === 'verificando' ? 'Verificando...' : 'Ingresar'}
+        </button>
+      </div>
     </main>
   );
 }
+
+function etiquetaRol(rol) {
+  return (
+    { trabajador: 'Trabajador / Solicitante', almacen: 'Responsable de Inventario', jefe_administrador: 'Jefe / Administrador' }[
+      rol
+    ] || rol
+  );
+}
+
+const estilos = {
+  contenedor: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  tarjeta: { width: '100%', maxWidth: 340, textAlign: 'center' },
+  titulo: { fontSize: 26, marginBottom: 4, color: '#2B2320' },
+  puntos: { display: 'flex', justifyContent: 'center', gap: 12, margin: '24px 0' },
+  punto: { width: 16, height: 16, borderRadius: '50%' },
+  teclado: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 },
+  tecla: { padding: '18px 0', fontSize: 20, borderRadius: 12, border: '1px solid #E7DDD3', background: '#fff', color: '#2B2320', cursor: 'pointer' },
+  boton: { width: '100%', padding: '14px 0', fontSize: 16, fontWeight: 600, borderRadius: 12, border: 'none', background: '#C1592B', color: '#fff', cursor: 'pointer' },
+};
